@@ -1,0 +1,47 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Pytest & Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Model Checkpoints & Large Weights
+checkpoints/
+*.pt
+*.pth
+*.bin
+*.onnx
+
+# Datasets & Large Arrays
+data/raw/
+data/processed/
+*.npy
+*.nii
+*.nii.gz
+
+# Temporary and Archives
+*.zip
+*.tar.gz
+*.rar
+*.log
+
+# Environments
+.env
+.env.local
+venv/
+env/
+ENV/
+
+# Node & Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+.next/
+node_modules/
+
+# OS Generated
+Thumbs.db
+.DS_Store
