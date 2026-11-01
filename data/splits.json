@@ -1,0 +1,16 @@
+{
+  "train": [
+    "BraTS20_Mock_003",
+    "BraTS20_Mock_004",
+    "BraTS20_Mock_005",
+    "BraTS20_Mock_006",
+    "BraTS20_Mock_007",
+    "BraTS20_Mock_008"
+  ],
+  "val": [
+    "BraTS20_Mock_001"
+  ],
+  "test": [
+    "BraTS20_Mock_002"
+  ]
+}
