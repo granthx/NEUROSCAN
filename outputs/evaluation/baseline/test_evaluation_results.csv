@@ -1,0 +1,2 @@
+case_id,dice_WT,dice_TC,dice_ET,dice_mean,hd95_WT,hd95_TC,hd95_ET,hd95_mean
+BraTS20_Mock_002,0.9434,0.9723,0.9274,0.9477,1.4142,50.9608,31.6788,28.0179
