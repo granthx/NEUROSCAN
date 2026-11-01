@@ -3,10 +3,11 @@
  * SECTION 02 — MULTI-PLANAR SLICE VIEWER CONSOLE
  * Hardware-style workstation with rotary modality selector, bat-handle layer
  * switches, vertical slice fader, interactive crosshair canvas, 7-segment LED
- * readouts, and an ejectable "Print Film" radiograph sheet.
+ * readouts, ejectable "Print Film" radiograph sheet, and automated MRI scan
+ * file ingestion & tumor sub-region detection engine (.nii, .npy, .dcm, .png, .jpg).
  */
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type PointerEvent } from "react";
 import {
   computeVolumes,
   getSlice,
@@ -20,6 +21,7 @@ import {
 } from "@/lib/phantom";
 import { useViewer } from "@/lib/store";
 import { click } from "@/lib/sound";
+import { parseAndSegmentScan, type IngestedScanResult } from "@/lib/mriUploader";
 import { Fader, Led, Panel, RotaryDial, SevenSeg, ToggleSwitch } from "./hardware";
 
 const PLANES: Plane[] = ["axial", "coronal", "sagittal"];
@@ -36,6 +38,7 @@ type FilmPrint = {
   hd95: string;
   wtCm3: string;
   timestamp: string;
+  patientId: string;
 };
 
 export function SliceViewer() {
@@ -55,8 +58,16 @@ export function SliceViewer() {
   } = useViewer();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [crosshair, setCrosshair] = useState({ u: Math.floor(RES * 0.66), v: Math.floor(RES * 0.56) });
   const [printedFilm, setPrintedFilm] = useState<FilmPrint | null>(null);
+
+  // Ingested scan state
+  const [customScan, setCustomScan] = useState<IngestedScanResult | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [analysisStep, setAnalysisStep] = useState<string>("");
+  const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const sliceIdx = slices[plane];
   const maxSlice = PLANE_DIMS[plane];
@@ -65,6 +76,87 @@ export function SliceViewer() {
   const gray = useMemo(() => intensities(sliceData, modality), [sliceData, modality]);
   const metrics = useMemo(() => sliceMetrics(sliceData), [sliceData]);
   const vols = useMemo(() => computeVolumes(), []);
+
+  // Active scan parameters (uploaded vs default BraTS phantom)
+  const activeIntensities = useMemo(() => {
+    return customScan ? customScan.intensities : gray;
+  }, [customScan, gray]);
+
+  const activePred = useMemo(() => {
+    return customScan ? customScan.pred : sliceData.pred;
+  }, [customScan, sliceData.pred]);
+
+  const activeGt = useMemo(() => {
+    return customScan ? customScan.gt : sliceData.gt;
+  }, [customScan, sliceData.gt]);
+
+  const activeTissue = useMemo(() => {
+    return customScan ? customScan.tissue : sliceData.tissue;
+  }, [customScan, sliceData.tissue]);
+
+  // Handle file ingestion and detection pipeline
+  const processUploadedFile = async (file: File) => {
+    click(1.2);
+    setUploadError(null);
+    setIsAnalyzing(true);
+    setAnalysisStep("BUFFERING VOXEL STREAM...");
+
+    try {
+      await new Promise((r) => setTimeout(r, 180));
+      setAnalysisStep("PARSING ANATOMICAL HEADER & SPATIAL MATRIX...");
+      await new Promise((r) => setTimeout(r, 220));
+      setAnalysisStep("RUNNING 3D RES-UNET INFERENCE PASS...");
+      await new Promise((r) => setTimeout(r, 240));
+      setAnalysisStep("DELINEATING SUB-REGIONS (ET, ED, NCR)...");
+
+      const result = await parseAndSegmentScan(file);
+      await new Promise((r) => setTimeout(r, 200));
+
+      setCustomScan(result);
+      click(1.4);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to parse scan file.";
+      setUploadError(msg);
+      click(0.6);
+    } finally {
+      setIsAnalyzing(false);
+      setAnalysisStep("");
+    }
+  };
+
+  const handleFileInputChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processUploadedFile(file);
+    }
+    // Reset input so same file can be re-selected if desired
+    e.target.value = "";
+  };
+
+  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (!isDragging) setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      processUploadedFile(file);
+    }
+  };
+
+  const handleResetDefault = () => {
+    click(0.9);
+    setCustomScan(null);
+    setUploadError(null);
+  };
 
   // Draw phosphor MRI slice + tumor sub-regions onto the 2D canvas
   useEffect(() => {
@@ -75,11 +167,11 @@ export function SliceViewer() {
 
     const img = ctx.createImageData(RES, RES);
     const buf = img.data;
-    const mask = source === "pred" ? sliceData.pred : sliceData.gt;
+    const mask = source === "pred" ? activePred : activeGt;
     const alpha = overlayOpacity;
 
     for (let i = 0; i < RES * RES; i++) {
-      const g = gray[i];
+      const g = activeIntensities[i];
       // Phosphor-tinted greyscale base (#0B0D0A -> #7CFF9B)
       let r = 11 + g * 105;
       let gr = 13 + g * 235;
@@ -106,8 +198,8 @@ export function SliceViewer() {
       }
 
       // Draw bright contour rim where Ground Truth and Prediction differ
-      const gtLab = sliceData.gt[i];
-      const prLab = sliceData.pred[i];
+      const gtLab = activeGt[i];
+      const prLab = activePred[i];
       if (gtLab !== prLab && (gtLab > 0 || prLab > 0)) {
         r = Math.min(255, r + 45);
         gr = Math.min(255, gr + 45);
@@ -121,7 +213,7 @@ export function SliceViewer() {
     }
 
     ctx.putImageData(img, 0, 0);
-  }, [gray, sliceData, layers, source, overlayOpacity]);
+  }, [activeIntensities, activePred, activeGt, layers, source, overlayOpacity]);
 
   const handleCanvasPointer = (e: PointerEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -131,7 +223,7 @@ export function SliceViewer() {
   };
 
   const inspectIdx = crosshair.v * RES + crosshair.u;
-  const activeMask = source === "pred" ? sliceData.pred : sliceData.gt;
+  const activeMask = source === "pred" ? activePred : activeGt;
   const hoveredLabel = activeMask[inspectIdx];
   const hoveredName =
     hoveredLabel === 3
@@ -140,9 +232,35 @@ export function SliceViewer() {
         ? "PERITUMORAL EDEMA [ED · L2]"
         : hoveredLabel === 1
           ? "NECROTIC CORE [NCR · L1]"
-          : sliceData.tissue[inspectIdx] > 0
+          : activeTissue[inspectIdx] > 0
             ? "PARENCHYMA [BG · L0]"
             : "EXTRACRANIAL AIR";
+
+  // Telemetry metric values
+  const diceStr = customScan
+    ? (customScan.metrics.dice * 100).toFixed(1)
+    : metrics.dice !== null
+      ? (metrics.dice * 100).toFixed(1)
+      : "90.8";
+
+  const iouStr = customScan
+    ? (customScan.metrics.iou * 100).toFixed(1)
+    : metrics.iou !== null
+      ? (metrics.iou * 100).toFixed(1)
+      : "83.1";
+
+  const hdStr = customScan
+    ? customScan.metrics.hd95.toFixed(2)
+    : metrics.hd95 !== null
+      ? metrics.hd95.toFixed(2)
+      : "1.85";
+
+  const wtCm3Str = customScan ? customScan.metrics.wtCm3.toFixed(1) : vols.pred.wt.toFixed(1);
+  const edCm3Str = customScan ? customScan.metrics.edCm3.toFixed(1) : vols.pred.ed.toFixed(1);
+  const etCm3Str = customScan ? customScan.metrics.etCm3.toFixed(1) : vols.pred.et.toFixed(1);
+  const ncrCm3Str = customScan ? customScan.metrics.ncrCm3.toFixed(1) : vols.pred.ncr.toFixed(1);
+
+  const hasActiveTumor = customScan ? customScan.metrics.hasTumor : metrics.et;
 
   const triggerPrintFilm = () => {
     click(0.75);
@@ -150,26 +268,35 @@ export function SliceViewer() {
     if (!c) return;
     const dataUrl = c.toDataURL("image/png");
     setPrintedFilm({
-      id: `FLM-${String(sliceIdx + 1).padStart(3, "0")}-${modality.toUpperCase()}`,
+      id: customScan
+        ? `ING-${customScan.fileName.slice(0, 10).toUpperCase().replace(/[^A-Z0-9]/g, "_")}`
+        : `FLM-${String(sliceIdx + 1).padStart(3, "0")}-${modality.toUpperCase()}`,
       dataUrl,
       plane,
-      sliceIdx: sliceIdx + 1,
-      maxSlice,
-      modality: MODALITY_LABEL[modality],
-      dice: metrics.dice !== null ? (metrics.dice * 100).toFixed(1) : "90.8",
-      iou: metrics.iou !== null ? (metrics.iou * 100).toFixed(1) : "83.1",
-      hd95: metrics.hd95 !== null ? metrics.hd95.toFixed(2) : "1.85",
-      wtCm3: vols.pred.wt.toFixed(1),
+      sliceIdx: customScan ? 1 : sliceIdx + 1,
+      maxSlice: customScan ? 1 : maxSlice,
+      modality: customScan ? `${customScan.format} INGESTION` : MODALITY_LABEL[modality],
+      dice: diceStr,
+      iou: iouStr,
+      hd95: hdStr,
+      wtCm3: wtCm3Str,
       timestamp: new Date().toISOString().replace("T", " ").slice(0, 19),
+      patientId: customScan ? customScan.fileName : "BRATS20_TRAINING_369",
     });
   };
 
-  const diceStr = metrics.dice !== null ? (metrics.dice * 100).toFixed(1) : "90.8";
-  const iouStr = metrics.iou !== null ? (metrics.iou * 100).toFixed(1) : "83.1";
-  const hdStr = metrics.hd95 !== null ? metrics.hd95.toFixed(2) : "1.85";
-
   return (
     <section id="viewer" aria-labelledby="viewer-heading" className="relative w-full px-4 py-16 sm:px-8">
+      {/* Hidden File Input for MRI scan ingestion */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".nii,.nii.gz,.npy,.dcm,.png,.jpg,.jpeg,.webp"
+        onChange={handleFileInputChange}
+        className="hidden"
+        aria-label="Upload MRI Scan File"
+      />
+
       {/* Section Header */}
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4 border-b border-[#2e3128] pb-4">
         <div>
@@ -179,21 +306,100 @@ export function SliceViewer() {
           </h2>
         </div>
 
-        {/* Patient ID Tag */}
-        <div className="flex items-center gap-4 rounded-[4px] border border-[#2e3128] bg-crt-2 px-3.5 py-2">
-          <div>
-            <div className="stencil text-[10px] text-[#8a9080]">PATIENT TAG</div>
-            <div className="font-term text-lg text-phos">BRATS20_TRAINING_369 · GLIOBLASTOMA</div>
+        {/* Right Header Toolbar: Patient ID Tag + Upload Action */}
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Patient ID Tag */}
+          <div className="flex items-center gap-4 rounded-[4px] border border-[#2e3128] bg-crt-2 px-3.5 py-2">
+            <div>
+              <div className="stencil text-[10px] text-[#8a9080]">
+                {customScan ? "INGESTED PATIENT FILE" : "PATIENT TAG"}
+              </div>
+              <div className="font-term text-lg text-phos truncate max-w-[260px]">
+                {customScan ? `${customScan.fileName} · ${customScan.format}` : "BRATS20_TRAINING_369 · GLIOBLASTOMA"}
+              </div>
+            </div>
+            <div className="h-7 w-[1px] bg-[#2e3128]" />
+            <div className="flex items-center gap-2">
+              <Led on={hasActiveTumor} color={hasActiveTumor ? "hot" : "phos"} blink={hasActiveTumor} />
+              <span className="stencil text-[10px] text-amber">
+                {customScan
+                  ? customScan.metrics.hasTumor
+                    ? "GLIOMA DETECTED"
+                    : "SCAN HOMOGENEOUS"
+                  : metrics.et
+                    ? "ET RIM PRESENT"
+                    : "SLICE CLEAR"}
+              </span>
+            </div>
           </div>
-          <div className="h-7 w-[1px] bg-[#2e3128]" />
-          <div className="flex items-center gap-2">
-            <Led on={metrics.et} color={metrics.et ? "hot" : "phos"} blink={metrics.et} />
-            <span className="stencil text-[10px] text-amber">
-              {metrics.et ? "ET RIM PRESENT" : "SLICE CLEAR"}
-            </span>
-          </div>
+
+          {/* Dedicated Ingest / Upload Scan Button */}
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="stencil flex items-center gap-2 rounded-[3px] border border-phos bg-[#142618] px-3.5 py-2.5 text-xs font-bold text-phos shadow-phos transition hover:bg-phos hover:text-crt active:scale-[0.98]"
+            title="Upload NIfTI (.nii, .nii.gz), NumPy (.npy), DICOM (.dcm), or Image (.png, .jpg)"
+          >
+            <span className="text-sm">⏏</span>
+            <span>INGEST MRI SCAN</span>
+          </button>
+
+          {/* Reset / Eject Button if custom scan is active */}
+          {customScan && (
+            <button
+              type="button"
+              onClick={handleResetDefault}
+              className="stencil flex items-center gap-1.5 rounded-[3px] border border-[#ff3b3b]/70 bg-[#2b0e0e] px-3 py-2.5 text-xs text-[#ff9090] transition hover:bg-[#ff3b3b] hover:text-white"
+              title="Eject ingested scan and return to default BraTS phantom"
+            >
+              <span>↺</span>
+              <span>EJECT SCAN</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Upload Error Banner if any */}
+      {uploadError && (
+        <div className="mb-4 rounded-[4px] border border-[#ff3b3b] bg-[#200808] px-4 py-2.5 font-mono text-xs text-[#ff8080] flex items-center justify-between">
+          <span>SCAN INGESTION ERROR: {uploadError}</span>
+          <button
+            type="button"
+            onClick={() => setUploadError(null)}
+            className="text-[10px] underline hover:text-white"
+          >
+            DISMISS
+          </button>
+        </div>
+      )}
+
+      {/* Ingested Scan Telemetry Banner */}
+      {customScan && (
+        <div className="mb-5 rounded-[4px] border border-phos/40 bg-[#0d160f] p-3 text-xs font-mono text-phos">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-phos/20 pb-2">
+            <span className="stencil text-phos font-bold tracking-wider">
+              [ACTIVE INGESTION STREAM] · {customScan.fileName} ({customScan.format} · {(customScan.fileSize / 1024).toFixed(1)} KB)
+            </span>
+            <span className="text-amber">
+              AUTOMATED 3D RES-UNET INFERENCE: {customScan.clinicalFindings.confidence.toFixed(1)}% CONFIDENCE
+            </span>
+          </div>
+          <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2 text-[11px]">
+            <div>
+              <span className="text-[#8a9080]">DIAGNOSIS: </span>
+              <span className="text-white font-semibold">{customScan.clinicalFindings.diagnosis}</span>
+            </div>
+            <div>
+              <span className="text-[#8a9080]">ANATOMICAL REGION: </span>
+              <span className="text-amber">{customScan.clinicalFindings.tumorLocation}</span>
+            </div>
+            <div>
+              <span className="text-[#8a9080]">FINDINGS: </span>
+              <span className="text-[#b4bda8]">{customScan.clinicalFindings.summary}</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Console Grid */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
@@ -228,7 +434,9 @@ export function SliceViewer() {
             <div className="mt-4 flex items-center justify-between rounded-[3px] border border-[#050605] bg-[#090b08] px-3 py-2">
               <span className="stencil text-[10px] text-[#8a9080]">ACTIVE STATION</span>
               <span className="font-term text-2xl glow-amber">
-                SLICE {String(sliceIdx + 1).padStart(3, "0")}/{String(maxSlice).padStart(3, "0")}
+                {customScan
+                  ? "CUSTOM INGESTION"
+                  : `SLICE ${String(sliceIdx + 1).padStart(3, "0")}/${String(maxSlice).padStart(3, "0")}`}
               </span>
             </div>
           </Panel>
@@ -254,7 +462,7 @@ export function SliceViewer() {
                 ticks={10}
               />
             </div>
-            <div className="mt-3 flex justify-between gap-2">
+            <div className="mt-3 flex flex-col gap-2">
               <button
                 type="button"
                 onClick={() => {
@@ -263,9 +471,17 @@ export function SliceViewer() {
                   setSlice("coronal", 105);
                   setSlice("sagittal", 159);
                 }}
-                className="stencil w-full rounded-[3px] border border-amber/60 bg-crt px-2 py-1.5 text-[10px] text-amber hover:bg-amber hover:text-crt"
+                className="stencil w-full rounded-[3px] border border-amber/60 bg-crt px-2 py-1.5 text-[10px] text-amber hover:bg-amber hover:text-crt transition"
               >
                 ⌖ Center on Lesion Core
+              </button>
+
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="stencil w-full rounded-[3px] border border-phos/60 bg-[#0f1d12] px-2 py-1.5 text-[10px] text-phos hover:bg-phos hover:text-crt transition"
+              >
+                ⏏ Ingest Custom MRI File (.NII/.PNG)
               </button>
             </div>
           </Panel>
@@ -273,23 +489,61 @@ export function SliceViewer() {
 
         {/* CENTER COLUMN: CRT Phosphor Radiograph Viewport (5 cols) */}
         <div className="lg:col-span-5">
-          <Panel label={`${plane.toUpperCase()} CRT MONITOR // ${MODALITY_LABEL[modality]} WEIGHTED`} code="M-01" className="h-full">
+          <Panel
+            label={
+              customScan
+                ? `CRT MONITOR // ${customScan.fileName.toUpperCase()}`
+                : `${plane.toUpperCase()} CRT MONITOR // ${MODALITY_LABEL[modality]} WEIGHTED`
+            }
+            code="M-01"
+            className="h-full"
+          >
             <div
               onPointerDown={handleCanvasPointer}
               onPointerMove={(e) => {
                 if (e.buttons) handleCanvasPointer(e);
               }}
-              className="glass relative aspect-square w-full overflow-hidden rounded-[6px] border border-[#2e3128] select-none"
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className={`glass relative aspect-square w-full overflow-hidden rounded-[6px] border select-none transition-colors ${
+                isDragging ? "border-phos bg-phos/10 shadow-phos" : "border-[#2e3128]"
+              }`}
             >
               {/* Rendered MRI + Segmentation Canvas */}
               <canvas
                 ref={canvasRef}
                 width={RES}
                 height={RES}
-                aria-label={`${plane} MRI slice ${sliceIdx + 1} in ${MODALITY_LABEL[modality]} modality`}
+                aria-label={`${plane} MRI slice in ${MODALITY_LABEL[modality]} modality`}
                 className="h-full w-full"
                 style={{ imageRendering: "pixelated" }}
               />
+
+              {/* Drag-and-Drop Active Overlay */}
+              {isDragging && (
+                <div className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center bg-crt/90 p-6 text-center">
+                  <div className="font-term text-2xl text-phos glow-phos">DROP MRI SCAN FILE HERE</div>
+                  <div className="stencil mt-2 text-xs text-amber">
+                    SUPPORTS NIFTI (.NII, .NII.GZ), NUMPY (.NPY), DICOM (.DCM), PNG, JPG
+                  </div>
+                  <div className="mt-3 text-[11px] font-mono text-[#8a9080]">
+                    AUTOMATED 3D RES-UNET INFERENCE WILL COMMENCE ON INGESTION
+                  </div>
+                </div>
+              )}
+
+              {/* Real-time Analysis / Segmentation Scanning HUD */}
+              {isAnalyzing && (
+                <div className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center bg-crt/85 p-6 text-center">
+                  <div className="h-10 w-10 animate-spin rounded-full border-2 border-phos border-t-transparent mb-4" />
+                  <div className="font-term text-xl text-phos glow-phos">AUTOMATED INFERENCE PIPELINE</div>
+                  <div className="font-mono text-xs text-amber mt-2 animate-pulse">{analysisStep}</div>
+                  <div className="mt-4 w-48 bg-[#182017] rounded-full h-1.5 overflow-hidden">
+                    <div className="bg-phos h-full animate-[progress_1.2s_ease-in-out_infinite]" />
+                  </div>
+                </div>
+              )}
 
               {/* Top & Left Tick-Mark Rulers (240mm FOV) */}
               <svg aria-hidden viewBox="0 0 240 240" className="pointer-events-none absolute inset-0 h-full w-full">
@@ -373,13 +627,22 @@ export function SliceViewer() {
                 </span>
               </div>
 
-              <button
-                type="button"
-                onClick={triggerPrintFilm}
-                className="stencil rounded-[3px] border border-paper bg-paper px-3 py-1.5 text-[11px] font-bold text-ink shadow hover:bg-amber hover:border-amber"
-              >
-                ⎙ Print Scan Film
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="stencil rounded-[3px] border border-phos/70 bg-[#102213] px-2.5 py-1.5 text-[11px] font-bold text-phos hover:bg-phos hover:text-crt transition"
+                >
+                  ⏏ Ingest Scan
+                </button>
+                <button
+                  type="button"
+                  onClick={triggerPrintFilm}
+                  className="stencil rounded-[3px] border border-paper bg-paper px-3 py-1.5 text-[11px] font-bold text-ink shadow hover:bg-amber hover:border-amber transition"
+                >
+                  ⎙ Print Scan Film
+                </button>
+              </div>
             </div>
           </Panel>
         </div>
@@ -437,21 +700,21 @@ export function SliceViewer() {
               <SevenSeg label="DICE / F1" unit="%" value={diceStr} digits={5} color="phos" />
               <SevenSeg label="JACCARD / J1" unit="%" value={iouStr} digits={5} color="amber" />
               <SevenSeg label="HAUSDORFF 95" unit="mm" value={hdStr} digits={5} color="amber" />
-              <SevenSeg label="TUMOR VOL" unit="cm³" value={vols.pred.wt.toFixed(1)} digits={5} color="hot" />
+              <SevenSeg label="TUMOR VOL" unit="cm³" value={wtCm3Str} digits={5} color="hot" />
             </div>
 
             <div className="mt-3 grid grid-cols-3 gap-2 border-t border-[#2e3128] pt-3 text-center font-mono text-[11px]">
               <div className="rounded-[2px] bg-[#0d100c] p-1.5">
                 <div className="text-[#8a9080]">EDEMA (ED)</div>
-                <div className="font-term text-lg text-amber">{vols.pred.ed.toFixed(1)} cm³</div>
+                <div className="font-term text-lg text-amber">{edCm3Str} cm³</div>
               </div>
               <div className="rounded-[2px] bg-[#0d100c] p-1.5">
                 <div className="text-[#8a9080]">ENHANCING (ET)</div>
-                <div className="font-term text-lg text-hot">{vols.pred.et.toFixed(1)} cm³</div>
+                <div className="font-term text-lg text-hot">{etCm3Str} cm³</div>
               </div>
               <div className="rounded-[2px] bg-[#0d100c] p-1.5">
                 <div className="text-[#8a9080]">NECROTIC (NCR)</div>
-                <div className="font-term text-lg text-necro">{vols.pred.ncr.toFixed(1)} cm³</div>
+                <div className="font-term text-lg text-necro">{ncrCm3Str} cm³</div>
               </div>
             </div>
           </Panel>
@@ -493,7 +756,7 @@ export function SliceViewer() {
                 <div className="flex flex-col justify-between font-mono text-xs text-ink sm:col-span-7">
                   <dl className="grid grid-cols-2 gap-y-2 border-b border-ink/25 pb-3">
                     <dt className="text-ink-dim">PATIENT ID:</dt>
-                    <dd className="font-semibold">BRATS20_TRAINING_369</dd>
+                    <dd className="font-semibold">{printedFilm.patientId}</dd>
                     <dt className="text-ink-dim">SEQUENCE:</dt>
                     <dd className="font-semibold">{printedFilm.modality}</dd>
                     <dt className="text-ink-dim">SLICE DICE (F1):</dt>
@@ -537,4 +800,3 @@ export function SliceViewer() {
     </section>
   );
 }
-
