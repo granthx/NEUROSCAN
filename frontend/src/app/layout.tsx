@@ -27,6 +27,16 @@ const barlow = Barlow_Condensed({
 export const metadata: Metadata = {
   title: `${PROJECT_NAME} — ${PROJECT_TAGLINE}`,
   description: `${PROJECT_TAGLINE} (T1, T1ce, T2, FLAIR). ${DISCLAIMER}`,
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/icon.png", type: "image/png" },
+    ],
+    apple: [
+      { url: "/apple-icon.png" },
+    ],
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

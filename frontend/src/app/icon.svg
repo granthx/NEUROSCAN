@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <radialGradient id="bgGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#003b1f" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#050a07" stop-opacity="1"/>
+    </radialGradient>
+    <linearGradient id="phosGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#39ff14"/>
+      <stop offset="50%" stop-color="#00ff88"/>
+      <stop offset="100%" stop-color="#00c853"/>
+    </linearGradient>
+    <filter id="neonGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="1.2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Dark CRT Badge Base -->
+  <rect width="64" height="64" rx="15" fill="url(#bgGlow)"/>
+  <rect width="64" height="64" rx="15" fill="none" stroke="#00ff88" stroke-width="1.5" stroke-opacity="0.6"/>
+
+  <!-- Scanning Grid / CRT Reticle -->
+  <circle cx="32" cy="32" r="23" fill="none" stroke="#00ff88" stroke-width="0.75" stroke-dasharray="2,3" stroke-opacity="0.35"/>
+  <line x1="32" y1="6" x2="32" y2="10" stroke="#00ff88" stroke-width="1.2" stroke-opacity="0.7"/>
+  <line x1="32" y1="54" x2="32" y2="58" stroke="#00ff88" stroke-width="1.2" stroke-opacity="0.7"/>
+  <line x1="6" y1="32" x2="10" y2="32" stroke="#00ff88" stroke-width="1.2" stroke-opacity="0.7"/>
+  <line x1="54" y1="32" x2="58" y2="32" stroke="#00ff88" stroke-width="1.2" stroke-opacity="0.7"/>
+
+  <!-- Cybernetic Brain Hemisphere Paths (Phosphor Neon Green) -->
+  <g filter="url(#neonGlow)">
+    <!-- Central Fissure -->
+    <path d="M 32 14 L 32 46" fill="none" stroke="#00ff88" stroke-width="1.2" stroke-opacity="0.4" stroke-dasharray="2,2"/>
+
+    <!-- Left Hemisphere Lobes -->
+    <path d="M 30 16 
+             C 24 14, 18 18, 17 24 
+             C 15 28, 16 33, 19 36 
+             C 17 38, 16 42, 19 45 
+             C 22 48, 27 47, 30 45" 
+          fill="none" stroke="url(#phosGrad)" stroke-width="2.5" stroke-linecap="round"/>
+
+    <!-- Left Inner Gyri / Sulci -->
+    <path d="M 23 23 C 27 24, 28 28, 25 31 C 28 33, 29 38, 25 41" 
+          fill="none" stroke="url(#phosGrad)" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M 29 20 C 27 22, 25 21, 23 23" 
+          fill="none" stroke="url(#phosGrad)" stroke-width="1.5" stroke-linecap="round"/>
+    <path d="M 30 35 C 27 34, 25 36, 26 39" 
+          fill="none" stroke="url(#phosGrad)" stroke-width="1.5" stroke-linecap="round"/>
+
+    <!-- Right Hemisphere Lobes -->
+    <path d="M 34 16 
+             C 40 14, 46 18, 47 24 
+             C 49 28, 48 33, 45 36 
+             C 47 38, 48 42, 45 45 
+             C 42 48, 37 47, 34 45" 
+          fill="none" stroke="url(#phosGrad)" stroke-width="2.5" stroke-linecap="round"/>
+
+    <!-- Right Inner Gyri / Sulci -->
+    <path d="M 41 23 C 37 24, 36 28, 39 31 C 36 33, 35 38, 39 41" 
+          fill="none" stroke="url(#phosGrad)" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M 35 20 C 37 22, 39 21, 41 23" 
+          fill="none" stroke="url(#phosGrad)" stroke-width="1.5" stroke-linecap="round"/>
+    <path d="M 34 35 C 37 34, 39 36, 38 39" 
+          fill="none" stroke="url(#phosGrad)" stroke-width="1.5" stroke-linecap="round"/>
+
+    <!-- Brain Stem / Medulla -->
+    <path d="M 30 46 C 30 50, 31 52, 32 53 C 33 52, 34 50, 34 46" 
+          fill="none" stroke="url(#phosGrad)" stroke-width="2" stroke-linecap="round"/>
+
+    <!-- Target Crosshair / Segmentation Focal Node (Amber Accent) -->
+    <circle cx="39" cy="27" r="3" fill="#ffb700" fill-opacity="0.8"/>
+    <circle cx="39" cy="27" r="5" fill="none" stroke="#ff3d00" stroke-width="0.8" stroke-opacity="0.9"/>
+  </g>
+</svg>
