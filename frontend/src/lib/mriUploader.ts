@@ -11,6 +11,7 @@
  * ------------------------------------------------------------------------- */
 
 import { RES, MM_PER_PX } from "./phantom";
+import { runBackendInference, API_BASE_URL } from "./api";
 
 export interface IngestedScanResult {
   fileName: string;
@@ -44,6 +45,15 @@ export interface IngestedScanResult {
  * Parses an uploaded File (.png, .jpg, .npy, .nii, .nii.gz, .dcm)
  */
 export async function parseAndSegmentScan(file: File): Promise<IngestedScanResult> {
+  // If remote backend API is reachable, prefer PyTorch model inference
+  if (API_BASE_URL && API_BASE_URL !== "undefined") {
+    try {
+      return await runBackendInference(file);
+    } catch (err) {
+      console.warn("Backend inference unreachable, falling back to local engine:", err);
+    }
+  }
+
   const name = file.name.toLowerCase();
   let rawIntensities: Float32Array;
   let detectedFormat: IngestedScanResult["format"] = "Raster Image";
@@ -455,3 +465,4 @@ function runSegmentationInference(
     },
   };
 }
+

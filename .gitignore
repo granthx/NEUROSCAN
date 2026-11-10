@@ -23,6 +23,7 @@ data/processed/
 *.nii.gz
 
 # Temporary and Archives
+deploy_hf_space/
 *.zip
 *.tar.gz
 *.rar
