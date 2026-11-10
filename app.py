@@ -105,6 +105,10 @@ if available:
         print(f"Warning loading default checkpoint: {e}")
 
 
+# ---------------------------------------------------------------------------
+# Core Inference Function (Decorated for Hugging Face ZeroGPU)
+# ---------------------------------------------------------------------------
+@spaces.GPU
 def run_slice_inference(raw_image: np.ndarray, model_name: str = "best_attention_unet.pt"):
     model = load_model_by_name(model_name)
 
@@ -164,9 +168,8 @@ def run_slice_inference(raw_image: np.ndarray, model_name: str = "best_attention
 
 
 # ---------------------------------------------------------------------------
-# Gradio Interface (Decorated for Hugging Face ZeroGPU)
+# Gradio Interface
 # ---------------------------------------------------------------------------
-@spaces.GPU
 def gradio_predict(image, model_choice):
     if image is None:
         return None, "Please upload an MRI slice image."
@@ -260,14 +263,14 @@ def list_models():
     }
 
 
+# Standard synchronous def (ZeroGPU compatible, no NotImplementedError)
 @demo.app.post("/predict")
 @demo.app.post("/api/predict")
-@spaces.GPU
-async def predict_api(
+def predict_api(
     file: UploadFile = File(...),
     checkpoint: Optional[str] = Query(default="best_attention_unet.pt"),
 ):
-    contents = await file.read()
+    contents = file.file.read()
     filename = file.filename.lower() if file.filename else "upload"
 
     if filename.endswith(".npy"):
