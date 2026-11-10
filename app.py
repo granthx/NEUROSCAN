@@ -34,9 +34,11 @@ DEVICE = get_device()
 
 
 def get_available_checkpoints() -> List[str]:
-    if not CHECKPOINTS_DIR.exists():
-        return []
-    return [p.name for p in CHECKPOINTS_DIR.glob("*.pt")]
+    ckpts = []
+    if CHECKPOINTS_DIR.exists():
+        ckpts.extend([p.name for p in CHECKPOINTS_DIR.glob("*.pt")])
+    ckpts.extend([p.name for p in BASE_DIR.glob("*.pt")])
+    return sorted(list(set(ckpts)))
 
 
 def load_model_by_name(ckpt_name: str) -> torch.nn.Module:
@@ -45,10 +47,14 @@ def load_model_by_name(ckpt_name: str) -> torch.nn.Module:
 
     ckpt_path = CHECKPOINTS_DIR / ckpt_name
     if not ckpt_path.exists():
+        ckpt_path = BASE_DIR / ckpt_name
+    if not ckpt_path.exists():
         available = get_available_checkpoints()
         if not available:
-            raise FileNotFoundError(f"No checkpoint available in {CHECKPOINTS_DIR}")
+            raise FileNotFoundError(f"No checkpoint available in {CHECKPOINTS_DIR} or {BASE_DIR}")
         ckpt_path = CHECKPOINTS_DIR / available[0]
+        if not ckpt_path.exists():
+            ckpt_path = BASE_DIR / available[0]
         ckpt_name = available[0]
 
     checkpoint = torch.load(str(ckpt_path), map_location=DEVICE)
