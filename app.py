@@ -1,11 +1,26 @@
+from __future__ import annotations
+
+# ---------------------------------------------------------------------------
+# ZeroGPU Support: MUST import spaces before torch
+# ---------------------------------------------------------------------------
+try:
+    import spaces
+except Exception:
+    class spaces:
+        @staticmethod
+        def GPU(func=None, **kwargs):
+            if func is not None:
+                return func
+            def decorator(f):
+                return f
+            return decorator
+
 """
 Unified Gradio UI + FastAPI Inference Server for Hugging Face Spaces.
 Supports both:
   1. Interactive Web Interface for humans browsing Hugging Face
   2. REST API endpoints (/predict, /health, /models) for Cloudflare Pages Next.js frontend
 """
-from __future__ import annotations
-
 import io
 import os
 import sys
@@ -149,8 +164,9 @@ def run_slice_inference(raw_image: np.ndarray, model_name: str = "best_attention
 
 
 # ---------------------------------------------------------------------------
-# Gradio Interface
+# Gradio Interface (Decorated for Hugging Face ZeroGPU)
 # ---------------------------------------------------------------------------
+@spaces.GPU
 def gradio_predict(image, model_choice):
     if image is None:
         return None, "Please upload an MRI slice image."
@@ -246,6 +262,7 @@ def list_models():
 
 @demo.app.post("/predict")
 @demo.app.post("/api/predict")
+@spaces.GPU
 async def predict_api(
     file: UploadFile = File(...),
     checkpoint: Optional[str] = Query(default="best_attention_unet.pt"),
