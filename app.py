@@ -227,7 +227,7 @@ with gr.Blocks(title="NeuroScan BraTS AI") as demo:
 
 
 # ---------------------------------------------------------------------------
-# Attach FastAPI Endpoints directly to demo.app
+# Attach FastAPI Endpoints directly to demo.app with full CORS
 # ---------------------------------------------------------------------------
 demo.app.add_middleware(
     CORSMiddleware,
@@ -263,7 +263,6 @@ def list_models():
     }
 
 
-# Standard synchronous def (ZeroGPU compatible, no NotImplementedError)
 @demo.app.post("/predict")
 @demo.app.post("/api/predict")
 def predict_api(
@@ -328,4 +327,5 @@ def predict_api(
 
 
 if __name__ == "__main__":
-    demo.launch()
+    # Disable SSR mode to prevent SvelteKit from blocking cross-origin POST form submissions
+    demo.launch(ssr_mode=False)
